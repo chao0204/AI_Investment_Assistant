@@ -1,8 +1,10 @@
 import yfinance as yf
 import pandas as pd
 import streamlit as st
+import requests
 import os
 import time
+import random
 import pytz
 from datetime import datetime
 
@@ -34,36 +36,46 @@ symbol_dict = {
 
 # 🔧 壓力測試：先只掃 3 檔，確認雲端能抓到資料後再恢復全量
 # scan_list = list(symbol_dict.keys())  # ← 全量，確認可用後再解除注解
-scan_list = ['2330.TW', '2317.TW', '2454.TW']  # ← 壓力測試 3 檔
+scan_list = ['^TWII', '2330.TW', '2317.TW']  # ← 壓力測試 3 檔（含大盤）
 
 # 建立記憶體
 if 'scan_result' not in st.session_state:
     st.session_state.scan_result = pd.DataFrame()
 
 if st.button('🚀 啟動掃描 (含大盤、期貨與中文名稱)'):
-    with st.spinner('正在掃描台股 50 檔標的...'):
-        df_batch = yf.download(scan_list, period="1mo", interval="1wk", group_by='ticker', progress=False, threads=False)
+    with st.spinner('正在掃描台股標的（偽裝瀏覽器模式）...'):
+        # ✅ 建立帶有 Chrome UA 的 requests Session，突破 Yahoo Finance 封鎖
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+        })
+
         results = []
         for symbol in scan_list:
             try:
-                df_stock = df_batch[symbol].dropna()
-                
+                # 逐一抓取，避免批次下載被封鎖
+                stock = yf.Ticker(symbol, session=session)
+                df_stock = stock.history(period='1mo', interval='1wk')
+                df_stock = df_stock.dropna()
+
                 # ✨ 特權防呆：大盤與期貨即使資料不足也絕對顯示
                 is_index = symbol in ("^TWII", "TX=F")
                 if df_stock.empty or len(df_stock) < 1:
                     st.warning(f"⚠️ 無法取得資料：{symbol}")
                     if not is_index:
+                        time.sleep(random.uniform(0.3, 0.7))
                         continue
-                    # 大盤/期貨完全無資料時，以全 0 填充後繼續
                     change_pct, body, lower_shadow, ratio = 0, 0, 0, 0
                     curr = {"Close": 0, "Open": 0, "Low": 0, "High": 0}
                 elif len(df_stock) < 2:
                     curr = df_stock.iloc[-1]
                     if is_index:
-                        # 只有 1 筆，漲跌幅無法計算，預設為 0
                         change_pct = 0
                     else:
                         st.warning(f"⚠️ 資料筆數不足（僅 1 筆）：{symbol}")
+                        time.sleep(random.uniform(0.3, 0.7))
                         continue
                     body = abs(curr['Open'] - curr['Close'])
                     lower_shadow = min(curr['Open'], curr['Close']) - curr['Low']
@@ -74,8 +86,8 @@ if st.button('🚀 啟動掃描 (含大盤、期貨與中文名稱)'):
                     lower_shadow = min(curr['Open'], curr['Close']) - curr['Low']
                     ratio = lower_shadow / body if body > 0 else lower_shadow
                     change_pct = (curr['Close'] - prev['Close']) / prev['Close'] * 100
-                
-                # ✨ 升級：專門為大盤和期貨客製化 TradingView 網址
+
+                # ✨ TradingView 連結
                 if symbol == "^TWII":
                     stock_num = "大盤"
                     tv_url = "https://tw.tradingview.com/chart/?symbol=TWSE%3ATAIEX"
@@ -85,10 +97,9 @@ if st.button('🚀 啟動掃描 (含大盤、期貨與中文名稱)'):
                 else:
                     stock_num = symbol.replace(".TW", "")
                     tv_url = f"https://tw.tradingview.com/chart/?symbol=TWSE%3A{stock_num}"
-                
-                # 取得中文名稱
+
                 stock_name = symbol_dict.get(symbol, "未知商品")
-                
+
                 results.append({
                     "代號": stock_num,
                     "商品名稱": stock_name,
@@ -98,13 +109,17 @@ if st.button('🚀 啟動掃描 (含大盤、期貨與中文名稱)'):
                     "訊號": "✅ 長腿出現" if ratio >= 1.5 and lower_shadow > 0 else "---",
                     "看盤連結": tv_url
                 })
+
+                # 隨機延遲 0.5 ± 0.2 秒，避免抓太快被封鎖
+                time.sleep(random.uniform(0.3, 0.7))
+
             except Exception as e:
                 st.warning(f"⚠️ 例外錯誤：{symbol} → {e}")
                 continue
-        
+
         st.session_state.scan_result = pd.DataFrame(results)
         if not results:
-            st.info("ℹ️ 目前抓取結果為空，正在檢查網路連接...（請確認 yfinance 版本與雲端網路是否正常）")
+            st.info("ℹ️ 目前抓取結果為空，请確認 yfinance 版本與雲端網路連線是否正常。")
 
 # 顯示介面與過濾邏輯
 if not st.session_state.scan_result.empty:
