@@ -1,0 +1,33 @@
+# 專案：AI 投資理財助手 (Personal AI Trading Assistant)
+**版本：** v1.0
+**建立日期：** 2024-05-22
+**開發模式：** Vibe Coding (Antigravity + Claude/Gemini)
+
+## 🎯 1. 專案目標
+自動化監控台股週線走勢，識別關鍵變盤訊號（如：週四/週五出現長下影線），以減少人工翻閱 K 線的時間，實現「邏輯選股，AI 執行」。
+
+## 🛠️ 2. 技術架構
+- **開發環境：** Google Antigravity (Agentic IDE)
+- **核心語言：** Python 3.10+
+- **數據來源：** `yfinance` (Yahoo Finance API)
+- **前端框架：** `Streamlit` (快速視覺化儀表板)
+- **AI 引擎：** Claude 3.5 Sonnet (邏輯開發) / Gemini 1.5 Pro (數據分析)
+
+## 🧠 3. 核心選股邏輯 (The Hammer Vibe)
+- **週期：** 週線 (Weekly)
+- **觸發時間：** 每個週四至週五。
+- **篩選指標：**
+    1. **下影線定義：** `min(Open, Close) - Low`。
+    2. **實體定義：** `abs(Open - Close)`。
+    3. **判定標準：** 下影線長度 > 實體長度的 2 倍 (初步設定)。
+    4. **加分項：** 觸碰 20 週或 60 週均線彈回、成交量放大。
+
+## 📋 4. WBS 任務拆解
+- [ ] **Phase 1: 環境搭建** - 在 Antigravity 中建立 Python 環境並安裝 `yfinance`, `pandas`, `streamlit`。
+- [ ] **Phase 2: 數據抓取** - 撰寫腳本抓取台股前 300 大市值標的之週線數據。
+- [ ] **Phase 3: 邏輯過濾器** - 實作下影線判定演算法。
+- [ ] **Phase 4: 前端介面** - 建立 Streamlit 列表，顯示符合條件的股票代號及「長腿原因」。
+
+## 📂 5. 歸檔與存放
+- **Gemini Voyager：** `05_私人生活與理財_Personal` > `[專案_AI投資理財助手]`
+- **本機路徑：** `G:\Sican_KB\05_私人生活與理財_Personal\[專案_AI投資理財助手]`
