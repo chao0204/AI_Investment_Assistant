@@ -1,8 +1,8 @@
 import yfinance as yf
 import pandas as pd
-import pandas_datareader as pdr
 import streamlit as st
 import requests
+import io
 import os
 import time
 import random
@@ -11,37 +11,51 @@ from datetime import datetime, timedelta
 
 tw_tz = pytz.timezone('Asia/Taipei')
 
-# ─────────────────────────────────────────────────
-# 🔧 雙引擎資料抓取函式：yfinance 先，stooq 備援
-# ─────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# 🔧 雙引擎資料抓取：stooq 優先（不封鎖雲端）→ yfinance 備援
+# ─────────────────────────────────────────────────────────────────
+def to_stooq_symbol(symbol: str) -> str:
+    """將 yfinance 代號轉為 stooq 格式"""
+    if symbol == '^TWII':
+        return '^twii'          # 加權指數：stooq 使用小寫
+    if symbol == 'TX=F':
+        return None             # 台指期：stooq 不支援
+    return symbol.replace('.TW', '.tw')  # 2330.TW → 2330.tw
+
 def fetch_weekly_data(symbol: str, session: requests.Session) -> pd.DataFrame:
-    """1mo 週線 K線，先試 yfinance，失敗則切換 stooq"""
-    # ─── 層一：yfinance 逆一抓取 ───
+    """
+    雙引擎 K 線抓取：
+    層一：stooq CSV 直接 HTTP 呼叫 — 不需額外套件、不封鎖雲端 IP
+    層二：yfinance — 本地環境備援
+    """
+    # ─── 層一：stooq CSV API（直接 HTTP，無需 pandas_datareader）───
+    stooq_sym = to_stooq_symbol(symbol)
+    if stooq_sym is not None:
+        try:
+            url = f"https://stooq.com/q/d/l/?s={stooq_sym}&i=w"
+            resp = session.get(url, timeout=15)
+            if resp.status_code == 200 and len(resp.content) > 50:
+                df = pd.read_csv(io.StringIO(resp.text))
+                df.columns = [c.strip() for c in df.columns]
+                if 'Date' in df.columns and 'Close' in df.columns:
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    df = df.sort_values('Date').set_index('Date')
+                    df = df[['Open', 'High', 'Low', 'Close']].dropna()
+                    if len(df) >= 1:
+                        return df.tail(8)  # 最近 8 週
+        except Exception:
+            pass
+
+    # ─── 層二：yfinance（備援，雲端可能被封）───────────────────
     try:
         ticker = yf.Ticker(symbol, session=session)
         df = ticker.history(period='1mo', interval='1wk')
-        if not df.empty and len(df) >= 1:
+        if df is not None and not df.empty:
             return df[['Open', 'High', 'Low', 'Close']].dropna()
     except Exception:
         pass
 
-    # ─── 層二：stooq 備援（指數類不支援） ───
-    if symbol in ('^TWII', 'TX=F'):
-        return pd.DataFrame()  # 指數賭長 stooq 無支援，直接回空
-    try:
-        stooq_sym = symbol.replace('.TW', '.TW').lower()  # e.g. 2330.tw
-        end   = datetime.now()
-        start = end - timedelta(days=35)
-        df = pdr.DataReader(stooq_sym, 'stooq', start, end)
-        if df is None or df.empty:
-            return pd.DataFrame()
-        df = df.sort_index()  # stooq 反序，先排普
-        df.index = pd.to_datetime(df.index)
-        # 改成週频
-        df = df.resample('W').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna()
-        return df[['Open', 'High', 'Low', 'Close']]
-    except Exception:
-        return pd.DataFrame()
+    return pd.DataFrame()  # 兩層都失敗
 
 # 網頁環境設定
 st.set_page_config(page_title="AI 投資理財助手", layout="wide")
