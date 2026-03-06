@@ -10,9 +10,6 @@ from datetime import datetime
 
 tw_tz = pytz.timezone('Asia/Taipei')
 
-# 雲端穩定性：停用 yfinance 時區快取，避免干擾
-yf.set_tz_cache_path(None)
-
 # 網頁環境設定
 st.set_page_config(page_title="AI 投資理財助手", layout="wide")
 st.title("🛡️ 台灣 50 + 大盤風向球 - 週線長腿雷達")
