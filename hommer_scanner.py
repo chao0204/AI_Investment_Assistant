@@ -1,6 +1,10 @@
 import yfinance as yf
 import pandas as pd
 import streamlit as st
+import os
+import time
+os.environ['TZ'] = 'Asia/Taipei'
+time.tzset()
 from datetime import datetime
 
 # 網頁環境設定
