@@ -1,14 +1,47 @@
 import yfinance as yf
 import pandas as pd
+import pandas_datareader as pdr
 import streamlit as st
 import requests
 import os
 import time
 import random
 import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 
 tw_tz = pytz.timezone('Asia/Taipei')
+
+# ─────────────────────────────────────────────────
+# 🔧 雙引擎資料抓取函式：yfinance 先，stooq 備援
+# ─────────────────────────────────────────────────
+def fetch_weekly_data(symbol: str, session: requests.Session) -> pd.DataFrame:
+    """1mo 週線 K線，先試 yfinance，失敗則切換 stooq"""
+    # ─── 層一：yfinance 逆一抓取 ───
+    try:
+        ticker = yf.Ticker(symbol, session=session)
+        df = ticker.history(period='1mo', interval='1wk')
+        if not df.empty and len(df) >= 1:
+            return df[['Open', 'High', 'Low', 'Close']].dropna()
+    except Exception:
+        pass
+
+    # ─── 層二：stooq 備援（指數類不支援） ───
+    if symbol in ('^TWII', 'TX=F'):
+        return pd.DataFrame()  # 指數賭長 stooq 無支援，直接回空
+    try:
+        stooq_sym = symbol.replace('.TW', '.TW').lower()  # e.g. 2330.tw
+        end   = datetime.now()
+        start = end - timedelta(days=35)
+        df = pdr.DataReader(stooq_sym, 'stooq', start, end)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        df = df.sort_index()  # stooq 反序，先排普
+        df.index = pd.to_datetime(df.index)
+        # 改成週频
+        df = df.resample('W').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna()
+        return df[['Open', 'High', 'Low', 'Close']]
+    except Exception:
+        return pd.DataFrame()
 
 # 網頁環境設定
 st.set_page_config(page_title="AI 投資理財助手", layout="wide")
@@ -40,22 +73,21 @@ if 'scan_result' not in st.session_state:
     st.session_state.scan_result = pd.DataFrame()
 
 if st.button('🚀 啟動掃描 (含大盤、期貨與中文名稱)'):
-    with st.spinner('正在掃描台股標的（偽裝瀏覽器模式）...'):
-        # ✅ 建立帶有 Chrome UA 的 requests Session，突破 Yahoo Finance 封鎖
+    with st.spinner('正在掃描台股標的（雙引擎模式：yfinance + stooq）...'):
+        # 共用的 requests Session，使用較少見的舊版 UA 避免被需
         session = requests.Session()
         session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+            'User-Agent': 'python-requests/2.28.2',
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
         })
 
         results = []
         for symbol in scan_list:
             try:
-                # 逐一抓取，避免批次下載被封鎖
-                stock = yf.Ticker(symbol, session=session)
-                df_stock = stock.history(period='1mo', interval='1wk')
-                df_stock = df_stock.dropna()
+                # ✅ 呼叫雙引擎函式（yfinance 先，stooq 備援）
+                df_stock = fetch_weekly_data(symbol, session)
 
                 # ✨ 特權防呆：大盤與期貨即使資料不足也絕對顯示
                 is_index = symbol in ("^TWII", "TX=F")
