@@ -1,4 +1,4 @@
-yfinance
-pandas
-streamlit
-altair
+streamlit==1.31.1
+yfinance==0.2.36
+pandas==2.2.0
+altair==4.2.2
