@@ -3,14 +3,19 @@ import pandas as pd
 import streamlit as st
 import os
 import time
-os.environ['TZ'] = 'Asia/Taipei'
-time.tzset()
+import pytz
 from datetime import datetime
+
+tw_tz = pytz.timezone('Asia/Taipei')
+
+# 雲端穩定性：停用 yfinance 時區快取，避免干擾
+yf.set_tz_cache_path(None)
 
 # 網頁環境設定
 st.set_page_config(page_title="AI 投資理財助手", layout="wide")
 st.title("🛡️ 台灣 50 + 大盤風向球 - 週線長腿雷達")
-st.subheader(f"📅 掃描時間：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+now_tw = datetime.now(tw_tz)
+st.write(f"� 目前雲端掃描時間 (台灣): {now_tw.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ✨ 升級：建立「商品名稱字典」，加入加權指數與台指期
 symbol_dict = {
@@ -27,15 +32,17 @@ symbol_dict = {
     "9904.TW": "寶成", "9910.TW": "豐泰", "2609.TW": "陽明", "2615.TW": "萬海"
 }
 
-scan_list = list(symbol_dict.keys())
+# 🔧 壓力測試：先只掃 3 檔，確認雲端能抓到資料後再恢復全量
+# scan_list = list(symbol_dict.keys())  # ← 全量，確認可用後再解除注解
+scan_list = ['2330.TW', '2317.TW', '2454.TW']  # ← 壓力測試 3 檔
 
 # 建立記憶體
 if 'scan_result' not in st.session_state:
     st.session_state.scan_result = pd.DataFrame()
 
 if st.button('🚀 啟動掃描 (含大盤、期貨與中文名稱)'):
-    with st.spinner('大運正在努力抓取數據與生成看盤連結...'):
-        df_batch = yf.download(scan_list, period="3mo", interval="1wk", group_by='ticker', progress=False)
+    with st.spinner('正在掃描台股 50 檔標的...'):
+        df_batch = yf.download(scan_list, period="1mo", interval="1wk", group_by='ticker', progress=False, threads=False)
         results = []
         for symbol in scan_list:
             try:
@@ -44,6 +51,7 @@ if st.button('🚀 啟動掃描 (含大盤、期貨與中文名稱)'):
                 # ✨ 特權防呆：大盤與期貨即使資料不足也絕對顯示
                 is_index = symbol in ("^TWII", "TX=F")
                 if df_stock.empty or len(df_stock) < 1:
+                    st.warning(f"⚠️ 無法取得資料：{symbol}")
                     if not is_index:
                         continue
                     # 大盤/期貨完全無資料時，以全 0 填充後繼續
@@ -55,6 +63,7 @@ if st.button('🚀 啟動掃描 (含大盤、期貨與中文名稱)'):
                         # 只有 1 筆，漲跌幅無法計算，預設為 0
                         change_pct = 0
                     else:
+                        st.warning(f"⚠️ 資料筆數不足（僅 1 筆）：{symbol}")
                         continue
                     body = abs(curr['Open'] - curr['Close'])
                     lower_shadow = min(curr['Open'], curr['Close']) - curr['Low']
@@ -82,17 +91,20 @@ if st.button('🚀 啟動掃描 (含大盤、期貨與中文名稱)'):
                 
                 results.append({
                     "代號": stock_num,
-                    "商品名稱": stock_name, # ✨ 新增欄位在這裡！
+                    "商品名稱": stock_name,
                     "現價": round(curr['Close'], 2),
                     "漲跌幅(%)": round(change_pct, 2),
                     "下影線倍數": round(ratio, 2),
-                    "訊號": "✅ 長腿出現" if ratio >= 2 and lower_shadow > 0 else "---",
+                    "訊號": "✅ 長腿出現" if ratio >= 1.5 and lower_shadow > 0 else "---",
                     "看盤連結": tv_url
                 })
-            except Exception:
+            except Exception as e:
+                st.warning(f"⚠️ 例外錯誤：{symbol} → {e}")
                 continue
         
         st.session_state.scan_result = pd.DataFrame(results)
+        if not results:
+            st.info("ℹ️ 目前抓取結果為空，正在檢查網路連接...（請確認 yfinance 版本與雲端網路是否正常）")
 
 # 顯示介面與過濾邏輯
 if not st.session_state.scan_result.empty:
